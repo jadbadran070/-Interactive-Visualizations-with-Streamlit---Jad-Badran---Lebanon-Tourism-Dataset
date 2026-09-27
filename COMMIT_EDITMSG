@@ -1,0 +1,8 @@
+Streamlit drill-down app for Lebanon tourism data
+
+Two linked controls: a governorate multiselect whose selection rebuilds the
+options of a district selectbox, driving a composition bar chart that switches
+between governorate, district and town level, plus a dining-vs-lodging scatter.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01379ud2NSSrEzNEGmsPNeZ7
