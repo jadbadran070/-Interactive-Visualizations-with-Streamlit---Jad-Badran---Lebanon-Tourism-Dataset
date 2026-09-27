@@ -1,31 +1,31 @@
 """
 MSBA 325 - Streamlit Activity
 Where Tourism Lives in Lebanon: an interactive drill-down
-
+ 
 Dataset : Tourism - Lebanon 2023 (AUB Linked Open Data / CODEC,
           publisher: Impact Open Data)
-Author  : Rayane
-
+Author  : Jad
+ 
 The page keeps two related visualizations from the Plotly assignment and
 connects them to two LINKED controls:
-
+ 
   Control 1 (sidebar)  : governorate multiselect  -> sets the scope
   Control 2 (sidebar)  : district selectbox       -> its OPTIONS are rebuilt
                          from whatever Control 1 currently holds, so the user
                          drills down (country -> governorate -> district ->
                          town) instead of filtering two things independently.
-
+ 
 Run locally:  streamlit run app.py
 """
-
+ 
 from pathlib import Path
-
+ 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-
+ 
 # --------------------------------------------------------------------------
 # Page setup and styling
 # --------------------------------------------------------------------------
@@ -35,7 +35,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
+ 
 CEDAR, DEEP, RED, INK = "#1F6F4A", "#123F2B", "#C8102E", "#1B2631"
 SEA, SAND, GREY, PANEL = "#2A7F9E", "#E9C46A", "#AEB6BF", "#F3F6F4"
 TYPE_COLORS = {
@@ -44,7 +44,7 @@ TYPE_COLORS = {
     "Hotels": RED,
     "Guest houses": SAND,
 }
-
+ 
 st.markdown(
     f"""
     <style>
@@ -71,16 +71,41 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
-
+ 
+ 
 # --------------------------------------------------------------------------
 # Data loading and cleaning (cached so the widgets stay instant)
 # --------------------------------------------------------------------------
-DATA_PATH = Path(__file__).parent / "data" / "Tourism_Lebanon_Dataset.csv"
-
+BASE_DIR = Path(__file__).parent
+ 
+ 
+def find_dataset() -> Path | None:
+    """Locate the dataset wherever it ended up in the repository.
+ 
+    Streamlit Cloud runs on Linux, where file names are case sensitive and a
+    folder dropped during a browser upload simply is not there. Rather than
+    hard-coding one path and crashing, the app looks in the likely places and,
+    failing that, takes any CSV sitting next to it.
+    """
+    named = ["Tourism_Lebanon_Dataset.csv", "Tourism Lebanon Dataset.csv"]
+    for folder in (BASE_DIR / "data", BASE_DIR):
+        for name in named:
+            candidate = folder / name
+            if candidate.is_file():
+                return candidate
+    for folder in (BASE_DIR / "data", BASE_DIR):
+        if folder.is_dir():
+            found = sorted(folder.glob("*.csv"))
+            if found:
+                return found[0]
+    return None
+ 
+ 
+DATA_PATH = find_dataset()
+ 
 COUNT_COLS = ["Restaurants", "Cafes", "Hotels", "Guest houses"]
 ALL_DISTRICTS = "All districts in the selection"
-
+ 
 # Each area in the source file is mapped to one of Lebanon's governorates.
 # Keserwan and Byblos are kept under Mount Lebanon; Beirut is not in the data.
 GOVERNORATE_OF = {
@@ -96,21 +121,21 @@ GOVERNORATE_OF = {
     "Marjeyoun": "Nabatieh", "Hasbaya": "Nabatieh",
     "Beqaa": "Beqaa", "Zahle": "Beqaa", "Western Beqaa": "Beqaa",
 }
-
-
+ 
+ 
 def _fix_mojibake(text: str) -> str:
     """Repair UTF-8 text that was decoded as Latin-1 (e.g. 'ZahlÃ©' -> 'Zahle')."""
     try:
         return text.encode("latin1").decode("utf8")
     except (UnicodeEncodeError, UnicodeDecodeError):
         return text
-
-
+ 
+ 
 @st.cache_data
-def load_data() -> pd.DataFrame:
-    df = pd.read_csv(DATA_PATH)
+def load_data(csv_path: str) -> pd.DataFrame:
+    df = pd.read_csv(csv_path)
     df["Town"] = df["Town"].str.strip()
-
+ 
     # refArea is a DBpedia URL that mixes district-level and governorate-level areas
     area = (
         df["refArea"].str.split("/").str[-1].apply(_fix_mojibake)
@@ -123,7 +148,7 @@ def load_data() -> pd.DataFrame:
     )
     df["Area"] = area
     df["Governorate"] = df["Area"].map(GOVERNORATE_OF)
-
+ 
     # Rows tagged only at governorate level get their own bucket, so a district
     # drill-down never silently hides towns. Akkar governorate is one district.
     df["District"] = np.where(
@@ -131,7 +156,7 @@ def load_data() -> pd.DataFrame:
         df["Area"],
         np.where(df["Area"] == "Akkar", "Akkar", df["Area"] + " (district not specified)"),
     )
-
+ 
     df = df.rename(
         columns={
             "Total number of restaurants": "Restaurants",
@@ -144,7 +169,7 @@ def load_data() -> pd.DataFrame:
             "improve the tourism sector - exists": "Recent initiative",
         }
     )
-
+ 
     df["Dining"] = df["Restaurants"] + df["Cafes"]
     df["Lodging"] = df["Hotels"] + df["Guest houses"]
     df["Total establishments"] = df[COUNT_COLS].sum(axis=1)
@@ -156,12 +181,24 @@ def load_data() -> pd.DataFrame:
          "Recent initiative", "Dining", "Lodging", "Has lodging",
          "Total establishments"] + COUNT_COLS
     ]
-
-
-df = load_data()
+ 
+ 
+if DATA_PATH is None:
+    # A clear message beats a raw traceback: say what is missing and where it goes.
+    st.error(
+        "**The dataset file is missing from the app folder.**\n\n"
+        "The app expects `data/Tourism_Lebanon_Dataset.csv` next to `app.py`. "
+        "Upload the CSV to the repository, keeping it inside a folder named `data`, "
+        "then reboot the app."
+    )
+    here = sorted(p.name for p in BASE_DIR.iterdir())
+    st.caption(f"Files the app can currently see: {', '.join(here) or 'none'}")
+    st.stop()
+ 
+df = load_data(str(DATA_PATH))
 GOVERNORATES = sorted(df["Governorate"].unique())
-
-
+ 
+ 
 # --------------------------------------------------------------------------
 # Header and page context
 # --------------------------------------------------------------------------
@@ -178,17 +215,17 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
+ 
 with st.expander("About the data (source, coverage, and how it was prepared)"):
     st.markdown(
         """
 **Source.** *Tourism &ndash; Lebanon 2023*, published by **Impact Open Data** and hosted as
 linked open data by the **American University of Beirut** (CODEC). Each row is one town.
-
+ 
 **What each row holds.** Counts of restaurants, cafes, hotels and guest houses; yes/no
 flags for untapped tourist attractions and for tourism projects in the last five years;
 and a **Tourism Index** from 0 (no activity recorded) to 10.
-
+ 
 **Preparation.**
 - The area of each town is stored inside a DBpedia URL, so the name is extracted from
   the link and broken accents are repaired.
@@ -197,13 +234,13 @@ and a **Tourism Index** from 0 (no activity recorded) to 10.
   **Beirut is not in the dataset.**
 - Towns the source tagged only at governorate level are kept in a visible
   *"(district not specified)"* bucket rather than dropped.
-
+ 
 **A caveat worth stating.** The survey records **presence and counts, not quality, size
 or revenue.** One large hotel and one guesthouse both count as one establishment.
         """
     )
-
-
+ 
+ 
 # --------------------------------------------------------------------------
 # THE TWO LINKED CONTROLS
 #   The district options below are rebuilt from the governorate selection, which
@@ -214,16 +251,16 @@ st.sidebar.caption(
     "Pick your regions first. The district list underneath rebuilds itself from "
     "that choice, so you can zoom in step by step."
 )
-
-
+ 
+ 
 def _reset_scope() -> None:
     st.session_state["govs"] = GOVERNORATES
     st.session_state["district"] = ALL_DISTRICTS
-
-
+ 
+ 
 if "govs" not in st.session_state:
     st.session_state["govs"] = GOVERNORATES
-
+ 
 # ---- Control 1: which governorates are in scope -------------------------
 selected_govs = st.sidebar.multiselect(
     "**1. Governorates**",
@@ -231,7 +268,7 @@ selected_govs = st.sidebar.multiselect(
     key="govs",
     help="Choose one or more regions to compare. Clearing this empties the page.",
 )
-
+ 
 if not selected_govs:
     # The reset button has to be drawn here too, otherwise clearing every region
     # leaves the reader with no one-click way back.
@@ -241,7 +278,7 @@ if not selected_govs:
     st.warning("No governorate is selected, so there is nothing to show. "
                "Pick a region in the sidebar, or press **Reset to all of Lebanon**.")
     st.stop()
-
+ 
 # ---- Control 2: district options depend on Control 1 --------------------
 district_options = [ALL_DISTRICTS] + sorted(
     df.loc[df["Governorate"].isin(selected_govs), "District"].unique()
@@ -250,7 +287,7 @@ district_options = [ALL_DISTRICTS] + sorted(
 # longer exist. Reset it before the widget is drawn so the app never errors.
 if st.session_state.get("district") not in district_options:
     st.session_state["district"] = ALL_DISTRICTS
-
+ 
 selected_district = st.sidebar.selectbox(
     "**2. District** (options come from your choice above)",
     options=district_options,
@@ -258,15 +295,15 @@ selected_district = st.sidebar.selectbox(
     help="Zoom into one district. The list only ever offers districts that exist "
          "inside the governorates you selected.",
 )
-
+ 
 st.sidebar.button("Reset to all of Lebanon", on_click=_reset_scope,
                   width="stretch")
-
+ 
 # ---- Apply the scope ----------------------------------------------------
 scope = df[df["Governorate"].isin(selected_govs)]
 if selected_district != ALL_DISTRICTS:
     scope = scope[scope["District"] == selected_district]
-
+ 
 # The drill-down level for the composition chart follows the two controls.
 if selected_district != ALL_DISTRICTS:
     level, level_label = "Town", f"towns in {selected_district}"
@@ -274,7 +311,7 @@ elif len(selected_govs) == 1:
     level, level_label = "District", f"districts of {selected_govs[0]}"
 else:
     level, level_label = "Governorate", "governorates"
-
+ 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     f"**In scope:** {len(scope):,} towns  \n"
@@ -283,13 +320,13 @@ st.sidebar.markdown(
 st.sidebar.caption(
     "Source: Tourism - Lebanon 2023, Impact Open Data / AUB linked open data."
 )
-
-
+ 
+ 
 # --------------------------------------------------------------------------
 # Headline numbers for the current scope
 # --------------------------------------------------------------------------
 st.subheader("The picture for your selection")
-
+ 
 total_est = int(scope["Total establishments"].sum())
 share_of_country = total_est / int(df["Total establishments"].sum()) * 100
 zero_share = (scope["Tourism Index"] == 0).mean() * 100
@@ -297,7 +334,7 @@ dining_towns = scope[scope["Dining"] > 0]
 lodging_share = (
     (dining_towns["Lodging"] > 0).mean() * 100 if len(dining_towns) else 0.0
 )
-
+ 
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Towns in scope", f"{len(scope):,}")
 k2.metric("Tourism establishments", f"{total_est:,}",
@@ -305,7 +342,7 @@ k2.metric("Tourism establishments", f"{total_est:,}",
 k3.metric("Share of Lebanon's total", f"{share_of_country:.0f}%")
 k4.metric("Towns with no tourism", f"{zero_share:.0f}%",
           help="Towns whose Tourism Index is 0.")
-
+ 
 national_tail = (
     "" if len(scope) == len(df) else " Across the whole country that figure is 35%."
 )
@@ -316,8 +353,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.write("")
-
-
+ 
+ 
 # --------------------------------------------------------------------------
 # Two insights the page is built to highlight
 # --------------------------------------------------------------------------
@@ -342,24 +379,24 @@ c2.markdown(
     unsafe_allow_html=True,
 )
 st.write("")
-
-
+ 
+ 
 # --------------------------------------------------------------------------
 # VISUALIZATION 1 - composition bar chart, redrawn at the drill-down level
 # --------------------------------------------------------------------------
 st.subheader(f"1. What the tourism offer is made of, by {level.lower()}")
-
+ 
 grouped = (
     scope.groupby(level, as_index=False)[COUNT_COLS + ["Total establishments"]]
     .sum()
     .sort_values("Total establishments", ascending=False)
 )
 grouped = grouped[grouped["Total establishments"] > 0]
-
+ 
 TOP_N = 15
 truncated = len(grouped) > TOP_N
 plot_df = grouped.head(TOP_N).sort_values("Total establishments")
-
+ 
 if plot_df.empty:
     st.info("No establishments are recorded anywhere in this selection.")
 else:
@@ -398,7 +435,7 @@ else:
         font=dict(family="Arial", size=13, color=INK),
     )
     st.plotly_chart(fig1, width="stretch")
-
+ 
     leader = grouped.iloc[0]
     lead_share = leader["Total establishments"] / grouped["Total establishments"].sum() * 100
     caption = (
@@ -409,13 +446,13 @@ else:
     if truncated:
         caption += f" Only the top {TOP_N} of {len(grouped)} are drawn."
     st.caption(caption)
-
-
+ 
+ 
 # --------------------------------------------------------------------------
 # VISUALIZATION 2 - dining vs lodging, one bubble per town in scope
 # --------------------------------------------------------------------------
 st.subheader("2. Do towns that feed visitors also host them?")
-
+ 
 sc = scope[scope["Dining"] > 0].copy()
 if sc.empty:
     st.info("No town in this selection has a restaurant or a cafe.")
@@ -426,7 +463,7 @@ else:
     sc["x"] = (sc["Restaurants"] + 1) * rng.uniform(0.94, 1.06, len(sc))
     sc["y"] = (sc["Cafes"] + 1) * rng.uniform(0.94, 1.06, len(sc))
     sc = sc.sort_values("Lodging")
-
+ 
     fig2 = px.scatter(
         sc, x="x", y="y", size="Bubble", color="Has lodging",
         color_discrete_map={"No lodging": GREY, "Has hotel or guest house": RED},
@@ -457,7 +494,7 @@ else:
                 ax=0, ay=ay, font=dict(size=12, color=INK),
                 bgcolor="rgba(255,255,255,0.8)",
             )
-
+ 
     ticks = [1, 2, 3, 6, 11, 21, 51, 101]
     fig2.update_xaxes(title="Restaurants in town (log scale)", tickvals=ticks,
                       ticktext=[t - 1 for t in ticks], gridcolor="#EAECEE")
@@ -471,7 +508,7 @@ else:
         font=dict(family="Arial", size=13, color=INK),
     )
     st.plotly_chart(fig2, width="stretch")
-
+ 
     gap = sc[sc["Lodging"] == 0].nlargest(3, "Dining")[["Town", "Dining"]]
     if len(gap):
         names = ", ".join(f"**{t}** ({int(d)} eateries)" for t, d in gap.to_numpy())
@@ -479,14 +516,14 @@ else:
             f"Each bubble is one town; bubble size is the number of hotels and guest "
             f"houses. Biggest lodging gaps in this selection: {names}."
         )
-
-
+ 
+ 
 # --------------------------------------------------------------------------
 # Design justifications (required by the brief)
 # --------------------------------------------------------------------------
 st.markdown("---")
 st.subheader("Why these two controls, and why this way")
-
+ 
 with st.expander("Control 1 - Governorate multiselect", expanded=False):
     st.markdown(
         """
@@ -494,19 +531,19 @@ with st.expander("Control 1 - Governorate multiselect", expanded=False):
 what happens if I put only the regions I care about side by side?"* A planner in the
 North does not want Mount Lebanon's 2,107 establishments flattening every other bar;
 a reader comparing the two southern governorates wants only those two on screen.
-
+ 
 **Why a multiselect and not something else.** Three alternatives were considered:
-
+ 
 - A **single-choice dropdown** would answer "what about my region?" but destroys
   comparison, which is the whole point of the first chart.
 - **Seven checkboxes** hold the same information but cost seven clicks to clear and
   push the second control far down the sidebar.
 - **Keeping all seven always visible** was the Plotly version of this chart, and it is
   exactly the clutter this page is trying to fix.
-
+ 
 The multiselect gives free comparison of any subset in one compact widget, and it
 defaults to all seven so the reader still gets the **overview first**.
-
+ 
 **The course concept behind it.** This is the first move of Shneiderman's mantra,
 *overview first, zoom and filter, details on demand*. It is also a deliberate
 **reduce-clutter / data-ink** decision: every governorate the reader removes is ink
@@ -515,7 +552,7 @@ axis, it also protects **accurate encoding** &mdash; small regions stay readable
 being crushed against the left edge by a single dominant bar.
         """
     )
-
+ 
 with st.expander("Control 2 - District drill-down (linked to Control 1)", expanded=False):
     st.markdown(
         """
@@ -523,22 +560,22 @@ with st.expander("Control 2 - District drill-down (linked to Control 1)", expand
 exactly is the activity, and which individual towns are driving it?"* A governorate
 total hides that Baabda district alone out-dines four entire governorates, and that
 inside Baabda a handful of towns hold most of it.
-
+ 
 **Why a dependent selectbox and not something else.** The important design decision is
 not the widget's shape but that **its options are rebuilt from Control 1**. Districts
 that do not exist inside the chosen governorates are never offered, so an empty chart
 is impossible by construction. Alternatives considered:
-
+ 
 - A **flat list of all 25 districts** independent of Control 1 lets the user pick
   Batroun while viewing the South and get a blank page. Two filters, no relationship.
 - A **text search box** would demand the user already know the district names, which
   is exactly the knowledge the page is meant to supply.
 - A **second multiselect** would allow arbitrary district combinations, but that
   re-creates the clutter problem one level down and makes "which town?" unanswerable.
-
+ 
 Single choice is the right constraint here, because the third level of the drill-down
 (towns) is only legible for one district at a time.
-
+ 
 **The course concept behind it.** This is **zoom-and-filter into details-on-demand**,
 and it is the reason the first chart silently changes what a bar means &mdash;
 governorate, then district, then town &mdash; instead of adding a third chart to the page.
@@ -548,7 +585,7 @@ zoomed view sits in the whole. Restricting the options is also **error preventio
 the interface will not let the reader build a question the data cannot answer.
         """
     )
-
+ 
 st.markdown("---")
 with st.expander("See the filtered data table"):
     st.dataframe(
@@ -558,9 +595,9 @@ with st.expander("See the filtered data table"):
         .reset_index(drop=True),
         width="stretch", height=380,
     )
-
+ 
 st.caption(
     "Data: Tourism - Lebanon 2023, Impact Open Data, published as linked open data by "
     "the American University of Beirut (CODEC). Built with Streamlit and Plotly for "
-    "MSBA 325 by Rayane."
+    "MSBA 325 by Jad."
 )
